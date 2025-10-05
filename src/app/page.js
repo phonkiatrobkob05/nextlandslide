@@ -143,42 +143,62 @@ export default function Home() {
     <>
 
       <Navbar />
-      <div className="min-h-screen bg-gradient-to-b from-[#F9FAFB] to-[#EEF1F6] flex flex-col items-center p-8 text-gray-800 font-sans">
+      <div className="min-h-screen bg-[#456882] flex flex-col items-center p-8 text-gray-800 font-sans">
         {/* Header */}
-        <h1 className="text-4xl font-extrabold text-blue-700 mb-6 tracking-tight">
-          SENSOR STATUS
-        </h1>
+        <div className="w-full h-full flex items-center justify-center mb-6">
+          <h1 className="text-6xl font-bold text-white tracking-tight">
+            SENSOR STATUS
+          </h1>
+        </div>
 
         {/* MQTT Component */}
-        <div className="w-full max-w-2xl mb-6">
-          <MqttClient
-            sub="sensor/landslide/data"
-            onData={(topic, obj) => {
-              // map Arduino keys -> model keys and call onSensorTick
-              onSensorTick("sensor001", {
-                Soil: Number(obj.Soil ?? obj.soil),
-                Temp: Number(obj.Temp ?? obj.temp),
-                humid: Number(obj.humid ?? obj.hum),       // accept "hum"
-                pressure: Number(obj.pressure ?? obj.pres),// accept "pres"
-                x: Number(obj.x),
-                y: Number(obj.y),
-                z: Number(obj.z),
-              });
-            }}
-          />
+        <div className="w-full max-w-2xl mb-6 p-4 bg-[#F9F6EE] rounded-2xl shadow-md border border-gray-200">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 text-blue-500"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path d="M2.5 10a7.5 7.5 0 0115 0 7.5 7.5 0 01-15 0z" />
+                <path
+                  fillRule="evenodd"
+                  d="M10 3.75a6.25 6.25 0 100 12.5 6.25 6.25 0 000-12.5zM9 7h2v4H9V7zm0 5h2v1H9v-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              MQTT Client
+            </h2>
+            <span className="text-sm text-gray-500 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
+              Sub: sensor/landslide/data
+            </span>
+          </div>
 
+          <div className="text-sm text-gray-600 italic mb-3">
+            กำลังเชื่อมต่อกับ MQTT Broker เพื่อรับข้อมูลเซนเซอร์แบบเรียลไทม์...
+          </div>
 
+          <div className="border-t border-gray-200 pt-3">
+            <MqttClient
+              sub="sensor/landslide/data"
+              onData={(topic, obj) => {
+                onSensorTick("sensor001", {
+                  Soil: Number(obj.Soil ?? obj.soil),
+                  Temp: Number(obj.Temp ?? obj.temp),
+                  humid: Number(obj.humid ?? obj.hum),
+                  pressure: Number(obj.pressure ?? obj.pres),
+                  x: Number(obj.x),
+                  y: Number(obj.y),
+                  z: Number(obj.z),
+                });
+              }}
+            />
+          </div>
         </div>
 
         {/* Controls */}
         <div className="flex items-center gap-5 mb-8">
-          <button
-            onClick={simulate}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
-          >
-            ▶️ Simulate 12 Ticks
-          </button>
-
           <label className="flex items-center gap-2 text-gray-700 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -188,63 +208,68 @@ export default function Home() {
               }}
               className="accent-blue-600 w-5 h-5"
             />
-            <span className="text-sm font-medium">เปิดเสียงอ่านผลลัพธ์</span>
+            <span className="text-sm text-white font-medium">เปิดเสียงอ่านผลลัพธ์</span>
           </label>
         </div>
 
         {/* Result Summary */}
-        {result ? (
-          <div className="bg-white p-6 rounded-2xl shadow-lg w-full max-w-2xl border border-gray-100">
-            <div className="text-lg font-semibold text-gray-800 mb-1">
-              ผลลัพธ์:
-              <span
-                className={`ml-1 ${LABELS[result.pred] === "ดินทรุด"
-                  ? "text-red-600"
-                  : LABELS[result.pred] === "เสี่ยงดินทรุด"
-                    ? "text-yellow-600"
-                    : LABELS[result.pred] === "ปกติ"
-                      ? "text-green-600"
-                      : ""
-                  }`}
-              >
-                {LABELS[result.pred]}
-              </span>
-            </div>
-
-            <div className="text-sm text-gray-600 mb-3">
-              prob: {result.prob.map(v => v.toFixed(3)).join(", ")}
-            </div>
-
-            {summary && (
-              <div className="mt-3 bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-100">
-                <div>
-                  <strong className="text-gray-800">สรุป:</strong> {summary.label} |
-                  <span className="ml-1">ระดับ: {summary.level}</span> |
-                  <span className="ml-1 text-blue-600 font-medium">
-                    ความเชื่อมั่น: {(summary.p * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div>
-                  ฮิสเทอรีซิส: {summary.streak} เฟรมต่อเนื่อง |
-                  <span className="ml-1">การกระทำ: {summary.action}</span>
-                </div>
-                <div>
-                  สั่งเตือนจริง:
-                  <span
-                    className={`ml-1 font-bold ${summary.fireAlarm
-                      ? "text-red-500 animate-pulse"
-                      : "text-gray-500"
-                      }`}
-                  >
-                    {summary.fireAlarm ? "ใช่" : "ไม่ใช่"}
-                  </span>
-                </div>
+        <div className="bg-[] p-6 rounded-2xl shadow-lg w-full max-w-2xl border border-gray-100">
+          {result ? (
+            <>
+              <div className="text-2xl font-semibold text-gray-800 mb-1">
+                ผลลัพธ์:
+                <span
+                  className={`ml-1 ${LABELS[result.pred] === "ดินทรุด"
+                    ? "text-red-600"
+                    : LABELS[result.pred] === "เสี่ยงดินทรุด"
+                      ? "text-yellow-600"
+                      : LABELS[result.pred] === "ปกติ"
+                        ? "text-green-600"
+                        : ""
+                    }`}
+                >
+                  {LABELS[result.pred]}
+                </span>
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="text-gray-400 italic mt-4">ยังไม่มีผลลัพธ์</div>
-        )}
+
+              <div className="text-xl text-gray-600 mb-3">
+                prob: {result.prob.map(v => v.toFixed(3)).join(", ")}
+              </div>
+
+              {summary && (
+                <div className="mt-3 text-2xl bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-100">
+                  <div>
+                    <strong className="text-gray-800">สรุป:</strong> {summary.label} |
+                    <span className="ml-1">ระดับ: {summary.level}</span> |
+                    <span className="ml-1 text-blue-600 font-medium">
+                      ความเชื่อมั่น: {(summary.p * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div>
+                    ฮิสเทอรีซิส: {summary.streak} เฟรมต่อเนื่อง |
+                    <span className="ml-1">การกระทำ: {summary.action}</span>
+                  </div>
+                  <div>
+                    สั่งเตือนจริง:
+                    <span
+                      className={`ml-1 font-bold ${summary.fireAlarm
+                        ? "text-red-500 animate-pulse"
+                        : "text-gray-500"
+                        }`}
+                    >
+                      {summary.fireAlarm ? "ใช่" : "ไม่ใช่"}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-gray-400 italic text-center py-6">
+              ยังไม่มีผลลัพธ์
+            </div>
+          )}
+        </div>
+
 
         {/* Condition Cards */}
         {result && (
