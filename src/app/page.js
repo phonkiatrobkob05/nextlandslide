@@ -2,13 +2,41 @@
 import { useEffect, useRef, useState } from "react";
 import { initModel, buildInput, predict } from "@/lib/onnx";
 import { makeRolling } from "@/lib/rolling";
+import useSound from 'use-sound';
 import MqttClient from "../mqttclient.js";
 import Navbar from "./components/navbar.js";
 
 const LABELS = ["ปกติ", "เสี่ยงดินทรุด", "ดินทรุด"];
 const BASE = ["Soil", "Temp", "humid", "pressure", "x", "y", "z"];
-
+const SENSOR_NAMES = {
+  sensor001: "เซนเซอร์หลัก (Main Sensor)",
+  sensor002: "ริมถนน (Roadside Sensor)",
+  sensor003: "หลังโรงเรียน (Behind School)",
+};
 export default function Home() {
+  // sounds
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const audioOn = useRef(false);
+  const audioUnlocked = useRef(false);
+
+  const [playReady] = useSound("/sound/ready_alert.m4a", { volume: 0.8, interrupt: true });
+  const [playWarn, { stop: stopWarn }] = useSound("/sound/yellow_alert.m4a", { volume: 0.8, interrupt: true });
+  const [playDanger, { stop: stopDanger }] = useSound("/sound/red_alert.m4a", { volume: 0.9, interrupt: true });
+  const [playNormal, { stop: stopNormal }] = useSound("/sound/green_alert.m4a", { volume: 0.6, interrupt: true });
+
+  const handleToggleAudio = (enabled) => {
+    setAudioEnabled(enabled);
+    if (enabled) {
+      audioOn.current = true;
+      audioUnlocked.current = true;   // unlock after a user gesture
+      playReady();
+    } else {
+      audioOn.current = false;
+      stopWarn?.(); stopDanger?.(); stopNormal?.();
+    }
+  };
+  const [sensorName, setSensorName] = useState("");
+
   const [result, setResult] = useState(null);
   const [summary, setSummary] = useState(null);
   const ready = useRef(false);
@@ -25,8 +53,10 @@ export default function Home() {
   const voicesReady = useRef(false);
   const warmed = useRef(false);
   const prevPred = useRef(null); // พูดเฉพาะเมื่อ pred เปลี่ยน
+  const [toggle, setToggle] = useState(false);
 
   useEffect(() => {
+    // const readyToUse = new Audio('/sound/ready_alert.mp3');
     const pick = () => {
       const vs = window.speechSynthesis?.getVoices?.() || [];
       ttsVoice.current =
@@ -39,29 +69,6 @@ export default function Home() {
     window.speechSynthesis?.addEventListener?.("voiceschanged", pick);
     return () => window.speechSynthesis?.removeEventListener?.("voiceschanged", pick);
   }, []);
-
-  function warmOnce() {
-    if (warmed.current || !ttsOn.current || !voicesReady.current) return;
-    const u = new SpeechSynthesisUtterance("พร้อมใช้งาน");
-    if (ttsVoice.current) u.voice = ttsVoice.current;
-    u.lang = ttsVoice.current?.lang || "th-TH";
-    u.rate = 1.1;
-    window.speechSynthesis.speak(u);
-    warmed.current = true;
-  }
-
-  function speakResult(pred) {
-    if (!ttsOn.current || !voicesReady.current) return;
-    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-      window.speechSynthesis.cancel();
-    }
-    const u = new SpeechSynthesisUtterance(`ผลลัพธ์ ${LABELS[pred]}`);
-    if (ttsVoice.current) u.voice = ttsVoice.current;
-    u.lang = ttsVoice.current?.lang || "th-TH";
-    u.rate = 1.1;
-    window.speechSynthesis.speak(u);
-  }
-
   useEffect(() => {
     initModel()
       .then(({ featureOrder: fo }) => { featureOrder.current = fo; ready.current = true; })
@@ -112,9 +119,18 @@ export default function Home() {
 
       // พูดเฉพาะเมื่อผลลัพธ์เปลี่ยน
       if (pred !== prevPred.current) {
-        speakResult(pred);
+        const name = LABELS[pred];
+
+        if (audioOn.current && audioUnlocked.current) {
+          if (name === "ดินทรุด") playDanger();
+          else if (name === "เสี่ยงดินทรุด") playWarn();
+          else if (name === "ปกติ") playNormal();
+        }
+
         prevPred.current = pred;
       }
+
+
     } catch (e) {
       console.error(e);
     } finally {
@@ -122,219 +138,191 @@ export default function Home() {
     }
   }
 
-  async function simulate() {
-    const base = { Soil: 2752, Temp: 27.4, humid: 78.6, pressure: 1011.9, x: 100, y: 88, z: 175 };
-    for (let i = 0; i < 12; i++) {
-      const raw = {
-        Soil: base.Soil + (Math.random() - 0.5) * 5,
-        Temp: base.Temp + (Math.random() - 0.5) * 0.2,
-        humid: base.humid + (Math.random() - 0.5) * 0.3,
-        pressure: base.pressure + (Math.random() - 0.5) * 0.5,
-        x: base.x + (Math.random() - 0.5) * 1,
-        y: base.y + (Math.random() - 0.5) * 1,
-        z: base.z + (Math.random() - 0.5) * 1,
-      };
-      await onSensorTick("sensor001", raw);
-      await new Promise(r => setTimeout(r, 5));
-    }
-  }
+  // async function simulate() {
+  //   const base = { Soil: 2752, Temp: 27.4, humid: 78.6, pressure: 1011.9, x: 100, y: 88, z: 175 };
+  //   for (let i = 0; i < 12; i++) {
+  //     const raw = {
+  //       Soil: base.Soil + (Math.random() - 0.5) * 5,
+  //       Temp: base.Temp + (Math.random() - 0.5) * 0.2,
+  //       humid: base.humid + (Math.random() - 0.5) * 0.3,
+  //       pressure: base.pressure + (Math.random() - 0.5) * 0.5,
+  //       x: base.x + (Math.random() - 0.5) * 1,
+  //       y: base.y + (Math.random() - 0.5) * 1,
+  //       z: base.z + (Math.random() - 0.5) * 1,
+  //     };
+  //     await onSensorTick("sensor001", raw);
+  //     await new Promise(r => setTimeout(r, 5));
+  //   }
+  // }
 
   return (
     <>
 
-      <Navbar />
-      <div className="min-h-screen bg-[#456882] flex flex-col items-center p-8 text-gray-800 font-sans">
+      <Navbar audioEnabled={audioEnabled} onToggle={handleToggleAudio} />
+      <div className="min-h-screen bg-gray-300 flex flex-col items-center p-8 text-gray-800">
+
         {/* Header */}
-        <div className="w-full h-full flex items-center justify-center mb-6">
-          <h1 className="text-6xl font-bold text-white tracking-tight">
-            SENSOR STATUS
+        {/* <div className="w-full flex items-center justify-center mb-10">
+          <h1 className="text-5xl font-extrabold text-white tracking-tight drop-shadow-lg">
+            SENSOR STATUS DASHBOARD
           </h1>
-        </div>
+        </div> */}
 
         {/* MQTT Component */}
-        <div className="w-full max-w-2xl mb-6 p-4 bg-[#F9F6EE] rounded-2xl shadow-md border border-gray-200">
+        <div className="w-full max-w-2xl mb-8 p-6 bg-white/20 backdrop-blur-md rounded-2xl shadow-xl hover:shadow-2xl transition-shadow duration-300">
           <div className="flex items-center justify-between mb-3">
+
             <h2 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5 text-blue-500"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
+              <svg xmlns="http://www.w3.org/2000/svg"
+                className="h-6 w-6 text-blue-600 animate-pulse"
+                viewBox="0 0 20 20" fill="currentColor">
                 <path d="M2.5 10a7.5 7.5 0 0115 0 7.5 7.5 0 01-15 0z" />
-                <path
-                  fillRule="evenodd"
+                <path fillRule="evenodd"
                   d="M10 3.75a6.25 6.25 0 100 12.5 6.25 6.25 0 000-12.5zM9 7h2v4H9V7zm0 5h2v1H9v-1z"
-                  clipRule="evenodd"
-                />
+                  clipRule="evenodd" />
               </svg>
-              MQTT Client
+              MQTT
             </h2>
-            <span className="text-sm text-gray-500 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
-              Sub: sensor/landslide/data
-            </span>
           </div>
 
-          <div className="text-sm text-gray-600 italic mb-3">
-            กำลังเชื่อมต่อกับ MQTT Broker เพื่อรับข้อมูลเซนเซอร์แบบเรียลไทม์...
-          </div>
-
-          <div className="border-t border-gray-200 pt-3">
-            <MqttClient
-              sub="sensor/landslide/data"
-              onData={(topic, obj) => {
-                onSensorTick("sensor001", {
-                  Soil: Number(obj.Soil ?? obj.soil),
-                  Temp: Number(obj.Temp ?? obj.temp),
-                  humid: Number(obj.humid ?? obj.hum),
-                  pressure: Number(obj.pressure ?? obj.pres),
-                  x: Number(obj.x),
-                  y: Number(obj.y),
-                  z: Number(obj.z),
-                });
-              }}
-            />
-          </div>
+          <MqttClient
+            sub="sensor/landslide/data/+"
+            onData={(topic, obj) => {
+              const sensorId = "sensor001";
+              setSensorName(SENSOR_NAMES[sensorId] || sensorId);
+              onSensorTick(sensorId, {
+                Soil: Number(obj.Soil ?? obj.soil),
+                Temp: Number(obj.Temp ?? obj.temp),
+                humid: Number(obj.humid ?? obj.hum),
+                pressure: Number(obj.pressure ?? obj.pres),
+                x: Number(obj.x),
+                y: Number(obj.y),
+                z: Number(obj.z),
+              });
+            }}
+          />
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-5 mb-8">
-          <label className="flex items-center gap-2 text-gray-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              onChange={e => {
-                ttsOn.current = e.target.checked;
-                if (e.target.checked) warmOnce();
-              }}
-              className="accent-blue-600 w-5 h-5"
-            />
-            <span className="text-sm text-white font-medium">เปิดเสียงอ่านผลลัพธ์</span>
-          </label>
-        </div>
 
-        {/* Result Summary */}
-        <div className="bg-[] p-6 rounded-2xl shadow-lg w-full max-w-2xl border border-gray-100">
-          {result ? (
-            <>
-              <div className="text-2xl font-semibold text-gray-800 mb-1">
-                ผลลัพธ์:
-                <span
-                  className={`ml-1 ${LABELS[result.pred] === "ดินทรุด"
-                    ? "text-red-600"
-                    : LABELS[result.pred] === "เสี่ยงดินทรุด"
-                      ? "text-yellow-600"
-                      : LABELS[result.pred] === "ปกติ"
-                        ? "text-green-600"
-                        : ""
-                    }`}
-                >
-                  {LABELS[result.pred]}
-                </span>
-              </div>
 
-              <div className="text-xl text-gray-600 mb-3">
-                prob: {result.prob.map(v => v.toFixed(3)).join(", ")}
-              </div>
+        <div className="bg-white/20 rounded-2xl h-auto w-full shadow-xl max-w-2xl p-4 flex flex-col gap-5  justify-center backdrop-blur-md  hover:shadow-2xl transition-shadow duration-300">
+          {sensorName && (
+            <div className="text-xl font-semibold text-white mb-4">
+              <span className="text-black">{sensorName}</span>
+            </div>
+          )}
 
-              {summary && (
-                <div className="mt-3 text-2xl bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-100">
-                  <div>
-                    <strong className="text-gray-800">สรุป:</strong> {summary.label} |
-                    <span className="ml-1">ระดับ: {summary.level}</span> |
-                    <span className="ml-1 text-blue-600 font-medium">
-                      ความเชื่อมั่น: {(summary.p * 100).toFixed(1)}%
-                    </span>
+          {/* Condition Cards */}
+          {result && (
+            <div className="w-full max-w-2xl space-y-6">
+              {LABELS[result.pred] === "ดินทรุด" && (
+                // playDanger(),
+                <div className="bg-white rounded-2xl shadow-lg border border-red-100 overflow-hidden transform hover:scale-[1.03] transition-all duration-300">
+                  <div className="bg-gradient-to-r from-[#6B0A1C] to-[#E9163C] text-white text-center py-3 text-2xl font-bold tracking-widest">
+                    DANGEROUS
                   </div>
-                  <div>
-                    ฮิสเทอรีซิส: {summary.streak} เฟรมต่อเนื่อง |
-                    <span className="ml-1">การกระทำ: {summary.action}</span>
-                  </div>
-                  <div>
-                    สั่งเตือนจริง:
-                    <span
-                      className={`ml-1 font-bold ${summary.fireAlarm
-                        ? "text-red-500 animate-pulse"
-                        : "text-gray-500"
-                        }`}
-                    >
-                      {summary.fireAlarm ? "ใช่" : "ไม่ใช่"}
-                    </span>
+                  <div className="flex items-center justify-center gap-4 p-6">
+                    <img src="./assets/img/alert-bell.svg" alt="dangerous_pic" className="w-[80px] h-[80px] animate-bounce" />
+                    <div className="text-xl font-semibold text-gray-800">
+                      อันตราย!<br />ดินทรุดตัว
+                    </div>
                   </div>
                 </div>
               )}
-            </>
-          ) : (
-            <div className="text-gray-400 italic text-center py-6">
-              ยังไม่มีผลลัพธ์
+
+              {LABELS[result.pred] === "เสี่ยงดินทรุด" && (
+                // playWar(),
+                <div className="bg-white rounded-2xl shadow-lg border border-yellow-100 overflow-hidden transform hover:scale-[1.03] transition-all duration-300">
+                  <div className="bg-gradient-to-r from-[#f2a600] to-[#ffcc32] text-white text-center py-3 text-2xl font-bold tracking-widest">
+                    WARNING
+                  </div>
+                  <div className="flex items-center justify-center gap-4 p-6">
+                    <img src="./assets/img/warning.svg" alt="warning_pic" className="w-[80px] h-[80px] animate-pulse" />
+                    <div className="text-xl font-semibold text-gray-800">
+                      โปรดระวัง!<br />ดินทรุดตัว
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {LABELS[result.pred] === "ปกติ" && (
+                <div className="bg-white rounded-2xl shadow-lg border border-green-100 overflow-hidden transform hover:scale-[1.03] transition-all duration-300">
+                  <div className="bg-gradient-to-r from-[#1C6016] to-[#32AA27] text-white text-center py-3 text-2xl font-bold tracking-widest">
+                    NORMAL
+                  </div>
+                  <div className="flex items-center justify-center gap-4 p-6">
+                    <img src="./assets/img/green-leaf.svg" alt="normal_pic" className="w-[80px] h-[80px]" />
+                    <div className="text-xl font-semibold text-gray-800">
+                      สภาวะปกติ
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
 
-
-        {/* Condition Cards */}
-        {result && (
-          <div className=" mt-12">
-            {/* DANGEROUS */}
-            {LABELS[result.pred] === "ดินทรุด" && (
-              <div className="bg-white rounded-2xl shadow-lg border border-red-100 overflow-hidden transform hover:scale-105 transition-all duration-300">
-                <div className="bg-gradient-to-r from-[#6B0A1C] to-[#E9163C] text-white text-center py-3 text-2xl font-bold tracking-widest">
-                  DANGEROUS
+          {/* Result Summary */}
+          <div className="bg-white/90 backdrop-blur-md p-6 rounded-2xl shadow-xl w-full max-w-2xl hover:shadow-2xl transition duration-300">
+            {result ? (
+              <>
+                <div className="text-2xl font-bold text-gray-800 mb-2">
+                  ผลลัพธ์:
+                  <span
+                    className={`ml-2 ${LABELS[result.pred] === "ดินทรุด"
+                      ? "text-red-600"
+                      : LABELS[result.pred] === "เสี่ยงดินทรุด"
+                        ? "text-yellow-600"
+                        : LABELS[result.pred] === "ปกติ"
+                          ? "text-green-600"
+                          : ""
+                      }`}
+                  >
+                    {LABELS[result.pred]}
+                  </span>
                 </div>
-                <div className="flex items-center justify-center gap-4 p-6">
-                  <img
-                    src="./assets/img/alert-bell.svg"
-                    alt="dangerous_pic"
-                    className="w-[80px] h-[80px]"
-                  />
-                  <div className="text-xl font-semibold text-gray-800">
-                    อันตราย! <br />
-                    ดินทรุดตัว
+
+                <div className="text-gray-600 text-lg mb-3">
+                  ความน่าจะเป็น: {result.prob.map(v => v.toFixed(3)).join(", ")}
+                </div>
+
+                {summary && (
+                  <div className="mt-3 bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-100 text-lg">
+                    <div>
+                      <strong className="text-gray-800">สรุป:</strong> {summary.label} |
+                      <span className="ml-1">ระดับ: {summary.level}</span> |
+                      <span className="ml-1 text-blue-600 font-semibold">
+                        ความเชื่อมั่น: {(summary.p * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div>
+                      ฮิสเทอรีซิส: {summary.streak} เฟรมต่อเนื่อง |
+                      <span className="ml-1">การกระทำ: {summary.action}</span>
+                    </div>
+                    <div>
+                      สั่งเตือนจริง:
+                      <span
+                        className={`ml-1 font-bold ${summary.fireAlarm
+                          ? "text-red-500 animate-pulse"
+                          : "text-gray-500"
+                          }`}
+                      >
+                        {summary.fireAlarm ? "ใช่" : "ไม่ใช่"}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* WARNING */}
-            {LABELS[result.pred] === "เสี่ยงดินทรุด" && (
-              <div className="bg-white rounded-2xl shadow-lg border border-yellow-100 overflow-hidden transform hover:scale-105 transition-all duration-300">
-                <div className="bg-gradient-to-r from-[#f2a600] to-[#ffcc32] text-white text-center py-3 text-2xl font-bold tracking-widest">
-                  WARNING
-                </div>
-                <div className="flex items-center justify-center gap-4 p-6">
-                  <img
-                    src="./assets/img/warning.svg"
-                    alt="warning_pic"
-                    className="w-[80px] h-[80px]"
-                  />
-                  <div className="text-xl font-semibold text-gray-800">
-                    โปรดระวัง! <br />
-                    ดินทรุดตัว
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* NORMAL */}
-            {LABELS[result.pred] === "ปกติ" && (
-              <div className="bg-white rounded-2xl shadow-lg border border-green-100 overflow-hidden transform hover:scale-105 transition-all duration-300">
-                <div className="bg-gradient-to-r from-[#1C6016] to-[#32AA27] text-white text-center py-3 text-2xl font-bold tracking-widest">
-                  NORMAL
-                </div>
-                <div className="flex items-center justify-center gap-4 p-6">
-                  <img
-                    src="./assets/img/green-leaf.svg"
-                    alt="normal_pic"
-                    className="w-[80px] h-[80px]"
-                  />
-                  <div className="text-xl font-semibold text-gray-800">
-                    สภาวะปกติ
-                  </div>
-                </div>
+                )}
+              </>
+            ) : (
+              <div className="text-gray-400 italic text-center py-8 text-lg">
+                กรุณารอรับข้อมูลจากเซนเซอร์...
               </div>
             )}
           </div>
-        )}
+        </div>
+
       </div>
+
     </>
   );
 }
